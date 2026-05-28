@@ -6,6 +6,7 @@ import { parseOptionalTelegramUserId } from '@strawberry/telegram/config';
 import { readEnvFile } from '../env-file.ts';
 import { hasPiAuth, readPiAuthProviders } from '../pi-auth.ts';
 import { resolveStrawberryPaths } from '../paths.ts';
+import { nodeWorks, resolveNodeExecutable } from '../resolve-node.ts';
 import { runCommand } from '../run.ts';
 import { printDoctorCheck, printDoctorHeader } from '../tui.ts';
 
@@ -39,6 +40,26 @@ export async function runDoctor(): Promise<number> {
     checks.push({ name: 'repo', ok: false, detail: message });
     printChecks(checks);
     return 1;
+  }
+
+  try {
+    const node = resolveNodeExecutable();
+    const brokenDefault = process.env.PATH?.split(':')
+      .map((entry) => `${entry}/node`)
+      .find((candidate) => candidate.endsWith('/node') && candidate.includes('node@22') && !nodeWorks(candidate));
+    checks.push({
+      name: 'node',
+      ok: true,
+      detail: brokenDefault
+        ? `${node} (avoid stale ${brokenDefault} on PATH)`
+        : node
+    });
+  } catch (error) {
+    checks.push({
+      name: 'node',
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error)
+    });
   }
 
   const configFiles = ['strawberry.env', 'host.env', 'telegram.env', 'agent.env'] as const;

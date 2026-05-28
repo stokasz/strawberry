@@ -103,6 +103,7 @@ install_dependencies() {
   ensure_brew_formula node Node.js
   # Prefer the current `node` formula over a stale linked node@22 on PATH.
   brew unlink node@22 >/dev/null 2>&1 || true
+  brew link --overwrite node >/dev/null 2>&1 || true
   hash -r 2>/dev/null || true
   ensure_brew_formula pnpm pnpm
   ensure_brew_formula container Apple\ Container

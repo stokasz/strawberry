@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 
+import { preferredProcessEnv } from './resolve-node.ts';
+
 export type RunResult = {
   code: number;
   stdout: string;
@@ -14,7 +16,7 @@ export function runCommand(
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: preferredProcessEnv(options.env),
       stdio: options.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe']
     });
 

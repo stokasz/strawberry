@@ -97,3 +97,11 @@ export function resolvePiBin(installRoot: string): string {
   }
   return 'pi';
 }
+
+export function resolvePiEntrypoint(installRoot: string): string {
+  const entry = join(installRoot, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'cli.js');
+  if (!existsSync(entry)) {
+    throw new Error('Pi is not installed. Run pnpm install in the Strawberry install root.');
+  }
+  return entry;
+}
