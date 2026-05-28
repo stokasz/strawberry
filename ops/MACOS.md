@@ -22,7 +22,6 @@ Grant **Local Network** access to `container-runtime-linux` in System Settings i
 After the native installer:
 
 ```bash
-strawberry onboard
 strawberry
 ```
 

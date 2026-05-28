@@ -30,7 +30,7 @@ function loadConfig(paths: StrawberryPaths): StackConfig {
 function requireOnboarded(paths: StrawberryPaths): StackConfig {
   const readiness = assessReadiness(paths);
   const blocker = readiness.issues.find((current) => current.blocking);
-  if (blocker) throw new StackError(`${blocker.message} — run strawberry onboard`);
+  if (blocker) throw new StackError(`${blocker.message} — run strawberry`);
   const config = loadConfig(paths);
   return config;
 }

@@ -25,7 +25,7 @@ export function requireConfigFile(paths: StrawberryPaths, name: typeof CONFIG_FI
   ensureConfigFiles(paths);
   const target = join(paths.configDir, `${name}.env`);
   if (!existsSync(target)) {
-    throw new Error(`missing config/${name}.env — run strawberry onboard`);
+    throw new Error(`missing config/${name}.env — run strawberry`);
   }
   return target;
 }

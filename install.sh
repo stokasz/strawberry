@@ -101,6 +101,9 @@ install_or_update_source() {
 install_dependencies() {
   ensure_homebrew
   ensure_brew_formula node Node.js
+  # Prefer the current `node` formula over a stale linked node@22 on PATH.
+  brew unlink node@22 >/dev/null 2>&1 || true
+  hash -r 2>/dev/null || true
   ensure_brew_formula pnpm pnpm
   ensure_brew_formula container Apple\ Container
   if command -v corepack >/dev/null 2>&1; then
@@ -113,17 +116,13 @@ install_dependencies() {
 
 write_wrapper() {
   local wrapper="${STRAWBERRY_BIN_DIR}/strawberry"
+  local template="${STRAWBERRY_INSTALL_ROOT}/ops/bin/strawberry-cli.sh"
   log "Installing CLI wrapper to ${wrapper}…"
   if [[ "${STRAWBERRY_INSTALL_DRY_RUN}" == "1" ]]; then
     return 0
   fi
-  cat >"${wrapper}" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-export STRAWBERRY_INSTALL_ROOT="${STRAWBERRY_INSTALL_ROOT}"
-NODE="\$(command -v node)"
-exec "\${NODE}" --experimental-strip-types "\${STRAWBERRY_INSTALL_ROOT}/packages/cli/src/cli.ts" "\$@"
-EOF
+  [[ -f "${template}" ]] || die "missing ${template}"
+  sed "s|@INSTALL_ROOT@|${STRAWBERRY_INSTALL_ROOT}|g" "${template}" >"${wrapper}"
   chmod 0755 "${wrapper}"
 }
 
@@ -144,7 +143,7 @@ main() {
   write_wrapper
   print_path_hint
   log "Installed Strawberry."
-  log "Next: strawberry onboard && strawberry"
+  log "Next: strawberry"
   log "Install root: ${STRAWBERRY_INSTALL_ROOT}"
   log "Default workspace: \${HOME}/.strawberry/workspace"
 }

@@ -22,11 +22,10 @@ Install (macOS 26+, Apple Silicon):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/stokasz/strawberry/main/install.sh | bash
-strawberry onboard
 strawberry
 ```
 
-The installer clones to `~/.strawberry/install`, installs Homebrew packages (`node`, `pnpm`, `container`), runs `pnpm install`, and places `strawberry` in `~/.local/bin`. Config and secrets live in `~/.strawberry/workspace` by default.
+The installer clones to `~/.strawberry/install`, installs Homebrew packages (`node`, `pnpm`, `container`), runs `pnpm install`, and places `strawberry` in `~/.local/bin`. The first `strawberry` run walks you through setup; later runs start the stack. Config and secrets live in `~/.strawberry/workspace` by default.
 
 Development from a source checkout:
 

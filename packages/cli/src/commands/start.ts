@@ -1,6 +1,8 @@
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ensureLaunchPrerequisites, formatBootstrapError } from '../bootstrap.ts';
+import { ensureWorkspaceDirs } from '../workspace.ts';
 import { readEnvFile } from '../env-file.ts';
 import { resolveStrawberryPaths } from '../paths.ts';
 import { assessReadiness } from '../readiness.ts';
@@ -14,6 +16,9 @@ export function isConfigured(paths: ReturnType<typeof resolveStrawberryPaths>): 
 
 export async function runStart(): Promise<number> {
   const paths = resolveStrawberryPaths();
+  mkdirSync(paths.configDir, { recursive: true, mode: 0o700 });
+  mkdirSync(paths.agentDir, { recursive: true, mode: 0o700 });
+  ensureWorkspaceDirs(paths);
 
   printLaunchBanner();
 

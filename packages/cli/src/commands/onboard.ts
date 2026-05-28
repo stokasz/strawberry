@@ -102,7 +102,7 @@ export async function runOnboard(options: { skipBanner?: boolean } = {}): Promis
   }
 
   if (!hasPiAuth(paths.agentDir)) {
-    printError('Pi auth missing. Run `strawberry onboard` again and finish /login.');
+    printError('Pi auth missing. Run `strawberry` again and finish /login.');
     return 1;
   }
 

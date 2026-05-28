@@ -176,8 +176,8 @@ export function printHelp(): void {
   printDivider();
   console.log(center(paint('Commands', COLORS.bold, COLORS.white)));
   console.log('');
-  printCommandRow('strawberry', 'Run Telegram + agent + host');
-  printCommandRow('strawberry onboard', 'First-time setup');
+  printCommandRow('strawberry', 'Setup on first run, then start Telegram + agent + host');
+  printCommandRow('strawberry onboard', 'Re-run setup without starting the stack');
   printCommandRow('strawberry stop', 'Stop everything');
   printCommandRow('strawberry status', 'See what is running');
   printCommandRow('strawberry doctor', 'Check config and health');

@@ -47,7 +47,7 @@ export function assessReadiness(paths: StrawberryPaths): ReadinessReport {
     issues.push(issue('agent-api-key-mismatch', 'STRAWBERRY_AGENT_API_KEY differs between telegram.env and agent.env'));
   }
   if (!hasPiAuth(paths.agentDir)) {
-    issues.push(issue('missing-pi-auth', 'missing Pi auth; run strawberry onboard'));
+    issues.push(issue('missing-pi-auth', 'missing Pi auth; run strawberry to finish setup'));
   }
 
   return {
