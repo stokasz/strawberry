@@ -1,0 +1,20 @@
+{
+  "name": "@strawberry/telegram",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./agent-transport": "./src/agent-transport.ts",
+    "./bot-profile": "./src/bot-profile.ts",
+    "./config": "./src/config.ts",
+    "./group-registry": "./src/group-registry.ts",
+    "./gateway": "./src/gateway.ts"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/gateway.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@strawberry/shared": "workspace:*"
+  }
+}

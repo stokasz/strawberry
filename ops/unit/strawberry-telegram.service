@@ -1,0 +1,23 @@
+[Unit]
+Description=Strawberry Telegram gateway
+After=network-online.target strawberry-host.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=strawberry
+Group=strawberry
+WorkingDirectory=/opt/strawberry
+EnvironmentFile=/opt/strawberry/config/strawberry.env
+EnvironmentFile=/opt/strawberry/config/telegram.env
+ExecStart=/opt/strawberry/ops/bin/start-telegram-gateway.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/strawberry/.strawberry /opt/strawberry/state /opt/strawberry/logs
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

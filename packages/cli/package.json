@@ -1,0 +1,21 @@
+{
+  "name": "@strawberry/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "strawberry": "./bin/strawberry.js"
+  },
+  "exports": {
+    "./env-file": "./src/env-file.ts",
+    "./paths": "./src/paths.ts"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@strawberry/shared": "workspace:*",
+    "@strawberry/telegram": "workspace:*"
+  }
+}

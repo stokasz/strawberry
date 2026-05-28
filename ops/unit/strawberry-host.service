@@ -1,0 +1,23 @@
+[Unit]
+Description=Strawberry trusted host API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=strawberry
+Group=strawberry
+WorkingDirectory=/opt/strawberry
+EnvironmentFile=/opt/strawberry/config/strawberry.env
+EnvironmentFile=/opt/strawberry/config/host.env
+ExecStart=/opt/strawberry/ops/bin/start-host-api.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/strawberry/state /opt/strawberry/logs
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+{
+  "name": "@strawberry/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./guest-upload": "./src/guest-upload.ts",
+    "./server": "./src/server.ts"
+  },
+  "scripts": {
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@strawberry/shared": "workspace:*"
+  }
+}

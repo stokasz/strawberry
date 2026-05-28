@@ -1,0 +1,21 @@
+{
+  "name": "strawberry",
+  "private": true,
+  "packageManager": "pnpm@11.4.0",
+  "type": "module",
+  "scripts": {
+    "strawberry": "pnpm --filter @strawberry/cli start",
+    "host:start": "pnpm --filter @strawberry/host start",
+    "telegram:start": "pnpm --filter @strawberry/telegram start",
+    "test": "vitest run",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "verify": "pnpm test && pnpm typecheck && bash ops/bin/verify-production.sh",
+    "verify:stack": "STRAWBERRY_RUN_STACK_SMOKE=1 bash ops/bin/smoke-stack.sh"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.76.0",
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

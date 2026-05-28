@@ -1,0 +1,16 @@
+{
+  "name": "@strawberry/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api.ts",
+    "./args": "./src/args.ts",
+    "./env": "./src/env.ts",
+    "./host-request-common": "./src/host-request-common.ts",
+    "./http-auth": "./src/http-auth.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

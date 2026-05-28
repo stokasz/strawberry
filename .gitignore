@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+
+# Local env and secrets
+.env
+.env.*
+!.env.example
+config/*.env
+!config/*.env.example
+
+# User workspace and agent state (never commit)
+.strawberry/
+state/
+logs/
+*.log
+
+# Editor
+.idea/
+.vscode/

@@ -1,0 +1,26 @@
+{
+  "name": "@strawberry/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./api": "./src/api.ts",
+    "./args": "./src/args.ts",
+    "./chain-block-request": "./src/chain-block-request.ts",
+    "./env": "./src/env.ts",
+    "./host-request-common": "./src/host-request-common.ts",
+    "./http-auth": "./src/http-auth.ts",
+    "./runtime": "./src/runtime.ts",
+    "./server": "./src/server.ts",
+    "./upload-store": "./src/upload-store.ts"
+  },
+  "scripts": {
+    "chain:block": "node --experimental-strip-types src/chain-block-request.ts",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.76.0",
+    "@strawberry/shared": "workspace:*"
+  }
+}

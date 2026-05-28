@@ -1,0 +1,8 @@
+.git
+node_modules
+state
+logs
+.strawberry/state
+config/*.env
+**/*.md
+!packages/**/README.md
