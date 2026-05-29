@@ -10,7 +10,7 @@ Run the agent on your Mac. Talk to it in Telegram with your group. Your keys sta
       / > 🍓              \ <
 
       {\__/}              {\__/}
-      ( o_o)              ( o_o)
+      ( o_o)              (o_o )
       / > 🍓  ---->       \ <
 
       {\__/}              {\__/}
