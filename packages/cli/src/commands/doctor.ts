@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { readRegisteredGroup } from '@strawberry/telegram/group-registry';
 import { parseOptionalTelegramUserId } from '@strawberry/telegram/config';
+import { fetchBotProfile, type BotProfile } from '@strawberry/telegram/bot-profile';
 import { readEnvFile } from '../env-file.ts';
 import { hasPiAuth, readPiAuthProviders } from '../pi-auth.ts';
 import { resolveStrawberryPaths } from '../paths.ts';
@@ -16,6 +17,12 @@ type Check = {
   detail: string;
 };
 
+type TelegramChatMemberPayload = {
+  ok: boolean;
+  result?: { status?: string };
+  description?: string;
+};
+
 async function probeUrl(url: string, bearer?: string): Promise<boolean> {
   const args = ['-fsS', '--max-time', '3', url];
   if (bearer) {
@@ -23,6 +30,20 @@ async function probeUrl(url: string, bearer?: string): Promise<boolean> {
   }
   const result = await runCommand('curl', args);
   return result.code === 0;
+}
+
+async function fetchBotGroupStatus(botToken: string, chatId: string, botId: number): Promise<string | undefined> {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/getChatMember`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: Number(chatId), user_id: botId }),
+    signal: AbortSignal.timeout(5_000)
+  });
+  const payload = await response.json() as TelegramChatMemberPayload;
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.description || `Telegram getChatMember failed: ${response.status}`);
+  }
+  return payload.result?.status;
 }
 
 export async function runDoctor(): Promise<number> {
@@ -90,6 +111,19 @@ export async function runDoctor(): Promise<number> {
     detail: telegramEnv.STRAWBERRY_TELEGRAM_BOT_TOKEN ? 'set' : 'missing'
   });
 
+  let botProfile: BotProfile | undefined;
+  if (telegramEnv.STRAWBERRY_TELEGRAM_BOT_TOKEN) {
+    try {
+      botProfile = await fetchBotProfile(telegramEnv.STRAWBERRY_TELEGRAM_BOT_TOKEN, 5_000);
+    } catch (error) {
+      checks.push({
+        name: 'telegram bot profile',
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   const adminUserRaw = telegramEnv.STRAWBERRY_TELEGRAM_ADMIN_USER_ID?.trim();
   if (adminUserRaw) {
     try {
@@ -119,6 +153,44 @@ export async function runDoctor(): Promise<number> {
     detail: pairedGroupId
       ? pairedGroupId
       : 'not paired yet — start and add the bot to a group'
+  });
+
+  if (pairedGroupId && telegramEnv.STRAWBERRY_TELEGRAM_BOT_TOKEN && botProfile) {
+    try {
+      const botGroupStatus = await fetchBotGroupStatus(
+        telegramEnv.STRAWBERRY_TELEGRAM_BOT_TOKEN,
+        pairedGroupId,
+        botProfile.id
+      );
+      const botIsGroupAdmin = botGroupStatus === 'administrator' || botGroupStatus === 'creator';
+      const hasGroupStream = botProfile.canReadAllGroupMessages !== false || botIsGroupAdmin;
+      checks.push({
+        name: 'telegram group access',
+        ok: hasGroupStream,
+        detail: hasGroupStream
+          ? botIsGroupAdmin
+            ? 'bot is group admin'
+            : 'Group Privacy disabled'
+          : 'Group Privacy enabled — disable it with @BotFather or make the bot a group admin, then remove and re-add the bot'
+      });
+    } catch (error) {
+      checks.push({
+        name: 'telegram group access',
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  const pairingCode = telegramEnv.STRAWBERRY_TELEGRAM_PAIRING_CODE?.trim();
+  checks.push({
+    name: 'telegram pairing code',
+    ok: Boolean(pairingCode || pairedGroupId),
+    detail: pairingCode
+      ? 'set'
+      : pairedGroupId
+        ? 'not needed after pairing'
+        : 'missing — run strawberry to regenerate config'
   });
 
   checks.push({

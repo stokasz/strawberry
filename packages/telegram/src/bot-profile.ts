@@ -2,6 +2,7 @@ export type BotProfile = {
   id: number;
   username?: string;
   firstName?: string;
+  canReadAllGroupMessages?: boolean;
 };
 
 export async function fetchBotProfile(
@@ -14,7 +15,7 @@ export async function fetchBotProfile(
   });
   const payload = await response.json() as {
     ok: boolean;
-    result?: { id: number; username?: string; first_name?: string };
+    result?: { id: number; username?: string; first_name?: string; can_read_all_group_messages?: boolean };
     description?: string;
   };
   if (!response.ok || !payload.ok || !payload.result) {
@@ -23,6 +24,7 @@ export async function fetchBotProfile(
   return {
     id: payload.result.id,
     username: payload.result.username,
-    firstName: payload.result.first_name
+    firstName: payload.result.first_name,
+    canReadAllGroupMessages: payload.result.can_read_all_group_messages
   };
 }

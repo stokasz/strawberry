@@ -1,10 +1,13 @@
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 import { readEnvFile } from './env-file.ts';
 import { configureRuntimeEnv } from './runtime-env.ts';
 import { requireConfigFile } from './config-files.ts';
+import { initConfig } from './init-config.ts';
 import { isUrlHealthy, waitForUrl } from './health.ts';
 import { assertGuestEnvHasNoHostSecrets } from './host-secrets.ts';
 import { readLogTail, redactedTailLines } from './log-utils.ts';
@@ -17,6 +20,16 @@ import { ensureStackRuntimeDirs, ensureWorkspaceDirs, resolveStackRuntimeLayout 
 type StackConfig = Record<string, string>;
 
 class StackError extends Error {}
+
+export type TelegramGatewayOwner = {
+  pid: number;
+  installRoot: string;
+  workspaceRoot: string;
+  stateRoot: string;
+  startedAt: string;
+};
+
+export type TelegramGatewayOwnerAction = 'reuse' | 'replace' | 'clear';
 
 function loadConfig(paths: StrawberryPaths): StackConfig {
   return {
@@ -119,6 +132,7 @@ async function ensureImage(paths: StrawberryPaths, config: StackConfig): Promise
 }
 
 export async function prepareStack(paths: StrawberryPaths): Promise<void> {
+  await initConfig(paths);
   const config = requireOnboarded(paths);
   ensureConfigBeforeStack(paths, config);
   await ensureRepoDeps(paths);
@@ -143,11 +157,7 @@ function pidPath(runRootDir: string, name: string): string {
   return join(runRootDir, `${name}.pid`);
 }
 
-async function isPidRunning(file: string): Promise<boolean> {
-  if (!existsSync(file)) {
-    return false;
-  }
-  const pid = Number.parseInt(readFileSync(file, 'utf8').trim(), 10);
+function isProcessRunning(pid: number): boolean {
   if (!Number.isFinite(pid) || pid <= 0) {
     return false;
   }
@@ -157,6 +167,62 @@ async function isPidRunning(file: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function readPid(file: string): number | undefined {
+  if (!existsSync(file)) {
+    return undefined;
+  }
+  const pid = Number.parseInt(readFileSync(file, 'utf8').trim(), 10);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return undefined;
+  }
+  return pid;
+}
+
+async function isPidRunning(file: string): Promise<boolean> {
+  const pid = readPid(file);
+  return pid !== undefined && isProcessRunning(pid);
+}
+
+export function terminateBackgroundProcess(pid: number, signal: NodeJS.Signals = 'SIGTERM'): void {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+    return;
+  } catch {
+    // Adopted services may not be process-group leaders.
+  }
+  process.kill(pid, signal);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessRunning(pid)) {
+      return true;
+    }
+    await sleep(100);
+  }
+  return !isProcessRunning(pid);
+}
+
+async function terminateBackgroundProcessAndWait(pid: number): Promise<void> {
+  if (!isProcessRunning(pid)) {
+    return;
+  }
+  terminateBackgroundProcess(pid);
+  if (await waitForProcessExit(pid)) {
+    return;
+  }
+  terminateBackgroundProcess(pid, 'SIGKILL');
+  await waitForProcessExit(pid, 2_000);
 }
 
 async function findListeningPid(port: number): Promise<number | undefined> {
@@ -171,6 +237,94 @@ async function findListeningPid(port: number): Promise<number | undefined> {
 function writeServiceLog(logs: string, name: 'host' | 'telegram', message: string): void {
   mkdirSync(logs, { recursive: true });
   writeFileSync(join(logs, `${name}.log`), `${message}\n`, { mode: 0o600 });
+}
+
+function telegramSingletonRoot(): string {
+  return process.env.STRAWBERRY_TELEGRAM_SINGLETON_ROOT?.trim()
+    || join(homedir(), '.strawberry', 'run', 'telegram-gateways');
+}
+
+function telegramSingletonPath(config: StackConfig): string | undefined {
+  const token = config.STRAWBERRY_TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) return undefined;
+  const digest = createHash('sha256').update(token).digest('hex').slice(0, 32);
+  return join(telegramSingletonRoot(), `${digest}.json`);
+}
+
+function readTelegramGatewayOwner(file: string | undefined): TelegramGatewayOwner | undefined {
+  if (!file || !existsSync(file)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<TelegramGatewayOwner>;
+    if (
+      Number.isSafeInteger(parsed.pid)
+      && typeof parsed.installRoot === 'string'
+      && typeof parsed.workspaceRoot === 'string'
+      && typeof parsed.stateRoot === 'string'
+      && typeof parsed.startedAt === 'string'
+    ) {
+      return parsed as TelegramGatewayOwner;
+    }
+  } catch {
+    // Corrupt singleton records are treated as stale.
+  }
+  return undefined;
+}
+
+export function telegramGatewayOwnerAction(
+  owner: TelegramGatewayOwner | undefined,
+  workspaceRoot: string,
+  ownerRunning: boolean
+): TelegramGatewayOwnerAction {
+  if (!owner || !ownerRunning) return 'clear';
+  return owner.workspaceRoot === workspaceRoot ? 'reuse' : 'replace';
+}
+
+function writeTelegramGatewayOwner(file: string | undefined, paths: StrawberryPaths, state: string, pid: number): void {
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileSync(file, JSON.stringify({
+    pid,
+    installRoot: paths.installRoot,
+    workspaceRoot: paths.workspaceRoot,
+    stateRoot: state,
+    startedAt: new Date().toISOString()
+  }, undefined, 2), { mode: 0o600 });
+}
+
+function removeTelegramGatewayOwner(file: string | undefined): void {
+  if (!file || !existsSync(file)) return;
+  unlinkSync(file);
+}
+
+async function acquireDirectoryLock(lockDir: string, timeoutMs = 10_000): Promise<() => void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      mkdirSync(lockDir, { recursive: false, mode: 0o700 });
+      return () => rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error;
+      }
+      if (Date.now() >= deadline) {
+        rmSync(lockDir, { recursive: true, force: true });
+        continue;
+      }
+      await sleep(100);
+    }
+  }
+}
+
+async function withTelegramSingletonLock<T>(config: StackConfig, fn: (file: string | undefined) => Promise<T>): Promise<T> {
+  const file = telegramSingletonPath(config);
+  if (!file) return fn(undefined);
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const release = await acquireDirectoryLock(`${file}.lock`);
+  try {
+    return await fn(file);
+  } finally {
+    release();
+  }
 }
 
 async function adoptHealthyServicePid(state: string, name: string, port: number, healthUrl: string): Promise<number | undefined> {
@@ -193,21 +347,21 @@ async function startBackgroundService(
   logs: string,
   state: string,
   options: { healthUrl?: string; healthBearer?: string; listenPort?: number } = {}
-): Promise<void> {
+): Promise<number | undefined> {
   const file = pidPath(state, name);
   if (await isPidRunning(file)) {
-    return;
+    return readPid(file);
   }
   if (options.healthUrl && options.listenPort) {
     const adoptedPid = await adoptHealthyServicePid(state, name, options.listenPort, options.healthUrl);
     if (adoptedPid) {
       writeServiceLog(logs, name, `[stack] reusing healthy ${name} service on port ${options.listenPort} (pid ${adoptedPid})`);
-      return;
+      return adoptedPid;
     }
   }
   if (options.healthUrl && (await isUrlHealthy(options.healthUrl, options.healthBearer))) {
     writeServiceLog(logs, name, `[stack] reusing healthy ${name} service`);
-    return;
+    return undefined;
   }
   if (options.listenPort) {
     const occupant = await findListeningPid(options.listenPort);
@@ -245,15 +399,16 @@ async function startBackgroundService(
   }
   child.unref();
   writeFileSync(file, String(child.pid));
+  return child.pid;
 }
 
 async function stopBackgroundService(state: string, name: string): Promise<void> {
   const file = pidPath(state, name);
   if (existsSync(file)) {
-    const pid = Number.parseInt(readFileSync(file, 'utf8').trim(), 10);
-    if (Number.isFinite(pid) && pid > 0) {
+    const pid = readPid(file);
+    if (pid !== undefined) {
       try {
-        process.kill(pid);
+        await terminateBackgroundProcessAndWait(pid);
       } catch {
         // already stopped
       }
@@ -320,6 +475,52 @@ async function stopAgentContainer(paths: StrawberryPaths, config: StackConfig): 
   }
 }
 
+async function startTelegramGateway(paths: StrawberryPaths, config: StackConfig, logs: string, state: string): Promise<void> {
+  await withTelegramSingletonLock(config, async (singletonFile) => {
+    const owner = readTelegramGatewayOwner(singletonFile);
+    const ownerAction = telegramGatewayOwnerAction(owner, paths.workspaceRoot, owner ? isProcessRunning(owner.pid) : false);
+    if (owner) {
+      if (ownerAction === 'reuse') {
+        mkdirSync(state, { recursive: true });
+        writeFileSync(pidPath(state, 'telegram'), String(owner.pid));
+        writeServiceLog(logs, 'telegram', `[stack] reusing telegram gateway for this workspace (pid ${owner.pid})`);
+        return;
+      }
+      if (ownerAction === 'replace') {
+        await terminateBackgroundProcessAndWait(owner.pid);
+      }
+      removeTelegramGatewayOwner(singletonFile);
+    }
+
+    const pid = await startBackgroundService(paths, 'telegram', 'start-telegram-gateway.sh', logs, state);
+    if (pid !== undefined) {
+      writeTelegramGatewayOwner(singletonFile, paths, state, pid);
+    }
+  });
+}
+
+async function stopTelegramGateway(paths: StrawberryPaths, config: StackConfig, state: string): Promise<void> {
+  await withTelegramSingletonLock(config, async (singletonFile) => {
+    const filePid = readPid(pidPath(state, 'telegram'));
+    await stopBackgroundService(state, 'telegram');
+
+    const owner = readTelegramGatewayOwner(singletonFile);
+    if (!owner) return;
+
+    if (owner.workspaceRoot !== paths.workspaceRoot && owner.pid !== filePid) {
+      if (!isProcessRunning(owner.pid)) {
+        removeTelegramGatewayOwner(singletonFile);
+      }
+      return;
+    }
+
+    if (isProcessRunning(owner.pid)) {
+      await terminateBackgroundProcessAndWait(owner.pid);
+    }
+    removeTelegramGatewayOwner(singletonFile);
+  });
+}
+
 export async function startStack(paths: StrawberryPaths): Promise<void> {
   await prepareStack(paths);
   const config = loadConfig(paths);
@@ -353,7 +554,7 @@ export async function startStack(paths: StrawberryPaths): Promise<void> {
   }
 
   console.log('  starting telegram gateway…');
-  await startBackgroundService(paths, 'telegram', 'start-telegram-gateway.sh', logs, state);
+  await startTelegramGateway(paths, config, logs, state);
   await new Promise((resolve) => setTimeout(resolve, 2_000));
   if (!(await isPidRunning(pidPath(state, 'telegram')))) {
     const tail = readLogTail(join(logs, 'telegram.log'));
@@ -366,7 +567,7 @@ export async function startStack(paths: StrawberryPaths): Promise<void> {
 export async function stopStack(paths: StrawberryPaths): Promise<void> {
   const config = loadConfig(paths);
   const state = runRoot(config, paths);
-  await stopBackgroundService(state, 'telegram');
+  await stopTelegramGateway(paths, config, state);
   await stopBackgroundService(state, 'host');
   await stopAgentContainer(paths, config);
 }
@@ -391,6 +592,7 @@ export async function statusStack(paths: StrawberryPaths): Promise<void> {
 }
 
 export async function buildStackImage(paths: StrawberryPaths): Promise<void> {
+  await initConfig(paths);
   const config = requireOnboarded(paths);
   ensureConfigBeforeStack(paths, config);
   await requireContainer();

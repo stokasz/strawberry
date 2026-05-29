@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readEnvFile } from './env-file.ts';
@@ -18,6 +18,16 @@ export type ReadinessReport = {
 
 function issue(code: string, message: string, blocking = true): ReadinessIssue {
   return { code, message, blocking };
+}
+
+function hasRegisteredTelegramGroup(stateRoot: string): boolean {
+  try {
+    const raw = readFileSync(join(stateRoot, 'registered-group.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { chatId?: unknown };
+    return Number.isSafeInteger(parsed.chatId);
+  } catch {
+    return false;
+  }
 }
 
 export function assessReadiness(paths: StrawberryPaths): ReadinessReport {
@@ -45,6 +55,15 @@ export function assessReadiness(paths: StrawberryPaths): ReadinessReport {
     && telegram.STRAWBERRY_AGENT_API_KEY !== agent.STRAWBERRY_AGENT_API_KEY
   ) {
     issues.push(issue('agent-api-key-mismatch', 'STRAWBERRY_AGENT_API_KEY differs between telegram.env and agent.env'));
+  }
+  const telegramStateRoot = telegram.STRAWBERRY_TELEGRAM_STATE_ROOT?.trim()
+    || join(paths.agentDir, 'state', 'telegram');
+  if (
+    !telegram.STRAWBERRY_TELEGRAM_GROUP_CHAT_ID?.trim()
+    && !telegram.STRAWBERRY_TELEGRAM_PAIRING_CODE?.trim()
+    && !hasRegisteredTelegramGroup(telegramStateRoot)
+  ) {
+    issues.push(issue('missing-telegram-pairing-code', 'missing STRAWBERRY_TELEGRAM_PAIRING_CODE for first group pairing'));
   }
   if (!hasPiAuth(paths.agentDir)) {
     issues.push(issue('missing-pi-auth', 'missing Pi auth; run strawberry to finish setup'));

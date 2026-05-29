@@ -12,6 +12,7 @@ import {
   type GatewayDependencies,
   type TelegramMessage
 } from '../src/gateway.ts';
+import { readRegisteredGroup } from '../src/group-registry.ts';
 
 function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
   return {
@@ -54,6 +55,30 @@ function telegramStub(overrides: Partial<GatewayDependencies['telegram']> = {}):
 
 function progressStatus(text: string, face = 'o_o'): string {
   return `{\\__/}\n( ${face})\n/ > 🍓 ${text}`;
+}
+
+function connectedMessage(botUsername = 'strawberry'): string {
+  return [
+    '🍓 StrawberryAI connected successfully.',
+    '',
+    `Hi! I am Strawberry. Tag me as @${botUsername}, reply to my message, or @mention me. Let's have fun with crypto!`
+  ].join('\n');
+}
+
+function almostConnectedMessage(): string {
+  return [
+    '🍓 StrawberryAI is almost connected.',
+    '',
+    'Send /pair <code> from the Strawberry host to connect this group.'
+  ].join('\n');
+}
+
+function missingPairingCodeMessage(): string {
+  return [
+    '🍓 StrawberryAI cannot pair yet.',
+    '',
+    'This host has no local Telegram pairing code configured. Run `strawberry` to regenerate config or set STRAWBERRY_TELEGRAM_PAIRING_CODE in config/telegram.env, then restart the gateway.'
+  ].join('\n');
 }
 
 describe('routeIncomingMessage', () => {
@@ -320,7 +345,7 @@ describe('routeIncomingMessage', () => {
     });
 
     expect(reset).toBe(true);
-    expect(sent).toEqual(['Fresh session started.']);
+    expect(sent).toEqual(['🍓 Fresh Strawberry session started.']);
   });
 
   it('does not pair a group until the local pairing code is sent', async () => {
@@ -364,9 +389,42 @@ describe('routeIncomingMessage', () => {
 
     expect(sent).toEqual([{
       chatId: -100555,
-      text: 'Almost connected. Ask the Strawberry host to pair this group with /pair and the local pairing code.'
+      text: almostConnectedMessage()
     }]);
     await gateway.handleMessage(groupMessage('hello', { chatId: -100555 }));
+    await rm(stateRoot, { recursive: true, force: true });
+  });
+
+  it('warns when Telegram Group Privacy prevents full group visibility', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'strawberry-privacy-warning-'));
+    const warnings: string[] = [];
+    const gateway = new StrawberryTelegramGateway(config({ stateRoot }), {
+      telegram: telegramStub({
+        getMe: async () => ({ id: 42, username: 'strawberry', canReadAllGroupMessages: false })
+      }),
+      agentTransport: {
+        health: async () => ({ ready: true, agentId: 'strawberry', startedAt: '', uptimeMs: 0, queueDepth: 0, rssBytes: 0 }),
+        upload: async () => ({ uploadId: 'upload' }),
+        readUpload: async () => {
+          throw new Error('unused');
+        },
+        prompt: async () => ({ reply: 'unused', latencyMs: 1 }),
+        resetSession: async () => ({ reset: true, sessionId: 'group-chat--100123' })
+      },
+      logger: { info: () => {}, warn: (message) => warnings.push(message), error: () => {} },
+      sleep: async () => {},
+      history: {
+        appendMessage: async () => {},
+        readContext: async () => [],
+        markAgentTurn: async () => {}
+      }
+    });
+
+    await gateway.prepare();
+
+    expect(warnings).toEqual([
+      '[telegram] bot Group Privacy is enabled; group chat will only receive limited updates unless the bot is a group admin. Disable Group Privacy with @BotFather or make the bot admin, then remove and re-add the bot if needed.'
+    ]);
     await rm(stateRoot, { recursive: true, force: true });
   });
 
@@ -420,8 +478,237 @@ describe('routeIncomingMessage', () => {
       expect(prompted).toBe(false);
       expect(sent).toEqual([{
         chatId: -100123,
-        text: 'Connected. @mention @strawberry or reply to my messages to talk. Send /new to reset the session.'
+        text: connectedMessage()
       }]);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the token bot profile instead of a stale configured username when pairing', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'strawberry-profile-pair-'));
+    const sent: Array<{ chatId: number; text: string; replyToMessageId?: number }> = [];
+    const gateway = new StrawberryTelegramGateway(
+      config({
+        groupChatId: undefined,
+        botId: undefined,
+        botUsername: 'old_bot',
+        adminUserId: undefined,
+        pairingCode: 'pair-me',
+        stateRoot
+      }),
+      {
+        telegram: telegramStub({
+          getMe: async () => ({ id: 43, username: 'aistrawberry_bot' }),
+          sendMessage: async (input) => {
+            sent.push({
+              chatId: input.chatId,
+              text: input.text,
+              replyToMessageId: input.replyToMessageId
+            });
+          }
+        }),
+        agentTransport: {
+          health: async () => ({ ready: true, agentId: 'strawberry', startedAt: '', uptimeMs: 0, queueDepth: 0, rssBytes: 0 }),
+          upload: async () => ({ uploadId: 'upload' }),
+          readUpload: async () => {
+            throw new Error('unused');
+          },
+          prompt: async () => ({ reply: 'unused', latencyMs: 1 }),
+          resetSession: async () => ({ reset: true, sessionId: 'group-chat--100123' })
+        },
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        sleep: async () => {},
+        history: {
+          appendMessage: async () => {},
+          readContext: async () => [],
+          markAgentTurn: async () => {}
+        }
+      }
+    );
+
+    try {
+      await gateway.prepare();
+      await gateway.handleMessage({
+        message_id: 10,
+        chat: { id: -100123, type: 'supergroup' },
+        from: { id: 501, username: 'alice', is_bot: false },
+        text: '/pair@aistrawberry_bot pair-me',
+        entities: [{ type: 'bot_command', offset: 0, length: 23 }]
+      });
+
+      expect(sent).toEqual([{
+        chatId: -100123,
+        text: connectedMessage('aistrawberry_bot')
+      }]);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('pairs a group with the bare local pairing command', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'strawberry-bare-pair-'));
+    const sent: Array<{ chatId: number; text: string; replyToMessageId?: number }> = [];
+    const historyMessages: string[] = [];
+    let prompted = false;
+    const gateway = new StrawberryTelegramGateway(
+      config({ groupChatId: undefined, botId: 42, adminUserId: undefined, pairingCode: 'pair-me', stateRoot }),
+      {
+        telegram: telegramStub({
+          sendMessage: async (input) => {
+            sent.push({
+              chatId: input.chatId,
+              text: input.text,
+              replyToMessageId: input.replyToMessageId
+            });
+          }
+        }),
+        agentTransport: {
+          health: async () => ({ ready: true, agentId: 'strawberry', startedAt: '', uptimeMs: 0, queueDepth: 0, rssBytes: 0 }),
+          upload: async () => ({ uploadId: 'upload' }),
+          readUpload: async () => {
+            throw new Error('unused');
+          },
+          prompt: async () => {
+            prompted = true;
+            return { reply: 'unused', latencyMs: 1 };
+          },
+          resetSession: async () => ({ reset: true, sessionId: 'group-chat--100123' })
+        },
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        sleep: async () => {},
+        history: {
+          appendMessage: async (input) => {
+            historyMessages.push(input.message.text);
+          },
+          readContext: async () => [],
+          markAgentTurn: async () => {}
+        }
+      }
+    );
+
+    try {
+      await gateway.handleMessage({
+        message_id: 10,
+        chat: { id: -100123, type: 'supergroup' },
+        from: { id: 501, username: 'alice', is_bot: false },
+        text: '/pair pair-me',
+        entities: [{ type: 'bot_command', offset: 0, length: 5 }]
+      });
+
+      expect(prompted).toBe(false);
+      expect(historyMessages).toEqual([]);
+      expect(sent).toEqual([{
+        chatId: -100123,
+        text: connectedMessage()
+      }]);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('explains when a pair command is sent without a configured local pairing code', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'strawberry-missing-pair-code-'));
+    const sent: Array<{ chatId: number; text: string; replyToMessageId?: number }> = [];
+    const gateway = new StrawberryTelegramGateway(
+      config({ groupChatId: undefined, botId: 42, adminUserId: undefined, pairingCode: undefined, stateRoot }),
+      {
+        telegram: telegramStub({
+          sendMessage: async (input) => {
+            sent.push({
+              chatId: input.chatId,
+              text: input.text,
+              replyToMessageId: input.replyToMessageId
+            });
+          }
+        }),
+        agentTransport: {
+          health: async () => ({ ready: true, agentId: 'strawberry', startedAt: '', uptimeMs: 0, queueDepth: 0, rssBytes: 0 }),
+          upload: async () => ({ uploadId: 'upload' }),
+          readUpload: async () => {
+            throw new Error('unused');
+          },
+          prompt: async () => ({ reply: 'unused', latencyMs: 1 }),
+          resetSession: async () => ({ reset: true, sessionId: 'group-chat--100123' })
+        },
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        sleep: async () => {},
+        history: {
+          appendMessage: async () => {
+            throw new Error('pair commands should not enter group history');
+          },
+          readContext: async () => [],
+          markAgentTurn: async () => {}
+        }
+      }
+    );
+
+    try {
+      await gateway.handleMessage({
+        message_id: 10,
+        chat: { id: -100123, type: 'supergroup' },
+        from: { id: 501, username: 'alice', is_bot: false },
+        text: '/pair pair-me',
+        entities: [{ type: 'bot_command', offset: 0, length: 5 }]
+      });
+
+      expect(sent).toEqual([{
+        chatId: -100123,
+        replyToMessageId: 10,
+        text: missingPairingCodeMessage()
+      }]);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates the paired group when Telegram upgrades it to a supergroup', async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), 'strawberry-group-migrate-'));
+    const logs: string[] = [];
+    let prompted = false;
+    const gateway = new StrawberryTelegramGateway(
+      config({ groupChatId: -5186255431, stateRoot }),
+      {
+        telegram: telegramStub(),
+        agentTransport: {
+          health: async () => ({ ready: true, agentId: 'strawberry', startedAt: '', uptimeMs: 0, queueDepth: 0, rssBytes: 0 }),
+          upload: async () => ({ uploadId: 'upload' }),
+          readUpload: async () => {
+            throw new Error('unused');
+          },
+          prompt: async () => {
+            prompted = true;
+            return { reply: 'ok', latencyMs: 1 };
+          },
+          resetSession: async () => ({ reset: true, sessionId: 'group-chat--1003658540993' })
+        },
+        logger: { info: (message) => logs.push(message), warn: () => {}, error: () => {} },
+        sleep: async () => {},
+        history: {
+          appendMessage: async () => {},
+          readContext: async () => [],
+          markAgentTurn: async () => {}
+        }
+      }
+    );
+
+    try {
+      await gateway.prepare();
+      await gateway.handleMessage({
+        message_id: 1,
+        chat: { id: -1003658540993, type: 'supergroup', title: 'StrawberryAI' },
+        migrate_from_chat_id: -5186255431
+      });
+
+      expect(logs).toContain('[telegram] migrated paired group -5186255431 -> -1003658540993');
+      expect(await readRegisteredGroup(stateRoot)).toEqual({
+        chatId: -1003658540993,
+        title: 'StrawberryAI',
+        registeredAt: expect.any(String)
+      });
+
+      await gateway.handleMessage(groupMessage('hello', { chatId: -1003658540993 }));
+      expect(prompted).toBe(true);
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }

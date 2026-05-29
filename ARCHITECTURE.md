@@ -63,7 +63,7 @@ The global `strawberry` command separates packaged code from user state:
 - Install root: Strawberry package files, `ops/`, and the container Dockerfile.
 - Workspace root: user config, apps, `.strawberry/`, state, and logs.
 
-When run from a source checkout, both roots default to the checkout. When installed globally, the workspace defaults to `~/.strawberry/workspace` and can be changed with `STRAWBERRY_WORKSPACE_ROOT`.
+When run from a source checkout without an installed wrapper, both roots default to the checkout. When installed globally, the wrapper pins the install root and the workspace defaults to `~/.strawberry/workspace`; the current directory does not change it. The only supported workspace override is `STRAWBERRY_WORKSPACE_ROOT`.
 
 ## State Model
 

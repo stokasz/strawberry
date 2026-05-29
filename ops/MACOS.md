@@ -38,7 +38,7 @@ Press Ctrl+C to stop. The foreground view stays compact; use `strawberry logs` f
 
 ## Talk in Telegram
 
-After `strawberry`, add your bot to a group in the Telegram app, then pair with the local `/pair` code printed during setup. Then @mention the bot or reply to one of its messages. Send `/new` to reset your session.
+In @BotFather, disable Group Privacy for your bot or make the bot a group admin. If you change privacy after adding the bot, remove and re-add it to the group. After `strawberry`, add your bot to a group in the Telegram app, then pair with the local `/pair` code printed during setup. Then @mention the bot or reply to one of its messages. Send `/new` to reset your session.
 
 ## Persistent workspace
 

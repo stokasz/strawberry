@@ -162,6 +162,7 @@ export async function runOnboard(options: { skipBanner?: boolean } = {}): Promis
   const pairingCode = readEnvFile(telegramEnvPath).STRAWBERRY_TELEGRAM_PAIRING_CODE;
   const nextSteps = [
     'Run `strawberry`',
+    'Disable Group Privacy in @BotFather or make the bot a group admin',
     'Add the bot to your Telegram group',
     'No Telegram user ID is needed for group chat',
     pairingCode

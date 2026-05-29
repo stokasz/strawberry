@@ -49,6 +49,8 @@ export type TelegramMessage = {
   reply_to_message?: { from?: TelegramUser };
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
+  migrate_to_chat_id?: number;
+  migrate_from_chat_id?: number;
 };
 
 export type TelegramUpdate = {
@@ -78,6 +80,7 @@ export type BotProfile = {
   id: number;
   username?: string;
   firstName?: string;
+  canReadAllGroupMessages?: boolean;
 };
 
 export type TelegramClient = {

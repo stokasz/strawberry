@@ -30,9 +30,5 @@ strawberry_workspace_root() {
     echo "${STRAWBERRY_WORKSPACE_ROOT}"
     return
   fi
-  if [[ -n "${STRAWBERRY_WORKSPACE:-}" ]]; then
-    echo "${STRAWBERRY_WORKSPACE}"
-    return
-  fi
   echo "${HOME}/.strawberry/workspace"
 }

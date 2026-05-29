@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/stokasz/strawberry/main/install.sh 
 strawberry
 ```
 
-The installer clones to `~/.strawberry/install`, installs Homebrew packages (`node`, `pnpm`, `container`), runs `pnpm install`, and places `strawberry` in `~/.local/bin`. The first `strawberry` run walks you through setup; later runs start the stack. Config and secrets live in `~/.strawberry/workspace` by default.
+The installer clones to `~/.strawberry/install`, installs Homebrew packages (`node`, `pnpm`, `container`), runs `pnpm install`, and places `strawberry` in `~/.local/bin`. The first `strawberry` run walks you through setup; later runs start the stack. Config and secrets live in `~/.strawberry/workspace` by default, regardless of the directory you launch from.
 
 Development from a source checkout:
 
@@ -43,7 +43,7 @@ Use `STRAWBERRY_WORKSPACE_ROOT=/path/to/workspace strawberry` to keep config, ap
 
 See [ops/MACOS.md](ops/MACOS.md) for prerequisites and troubleshooting.
 
-`strawberry onboard` runs Pi's native `/login` flow into `.strawberry/auth.json`, then collects your Telegram bot token and optional chain settings (all host-only secrets). You do not need your numeric Telegram user ID for group chat; it is only for optional admin DMs. Add the bot to your group after `strawberry`.
+`strawberry onboard` runs Pi's native `/login` flow into `.strawberry/auth.json`, then collects your Telegram bot token and optional chain settings (all host-only secrets). You do not need your numeric Telegram user ID for group chat; it is only for optional admin DMs. In @BotFather, disable Group Privacy for the bot or make the bot a group admin, then add it to your group after `strawberry`.
 
 Pair the group with the local `/pair` code printed by onboard, then talk by @mentioning the bot or replying to her after the bot sends the Connected message. Press Ctrl+C to stop.
 

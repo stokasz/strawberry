@@ -55,9 +55,13 @@ export function resolveInstallRoot(cwd: string = process.cwd()): string {
 }
 
 export function resolveWorkspaceRoot(cwd: string = process.cwd()): string {
-  const fromEnv = process.env.STRAWBERRY_WORKSPACE_ROOT?.trim() || process.env.STRAWBERRY_WORKSPACE?.trim();
+  const fromEnv = process.env.STRAWBERRY_WORKSPACE_ROOT?.trim();
   if (fromEnv) {
     return resolve(fromEnv);
+  }
+
+  if (process.env.STRAWBERRY_INSTALL_ROOT?.trim()) {
+    return defaultWorkspaceRoot();
   }
 
   const fromCwd = walkUpForAnyFile(cwd, WORKSPACE_MARKERS);

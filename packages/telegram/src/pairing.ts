@@ -8,8 +8,9 @@ function escapeRegExp(value: string): string {
 export function pairCommandCode(message: TelegramMessage, botUsername?: string): string | undefined {
   const text = messageText(message, 128);
   if (!text) return undefined;
-  const command = botUsername
-    ? new RegExp(`^/pair@${escapeRegExp(botUsername.replace(/^@/, ''))}\\s+(\\S+)`, 'i')
+  const bot = botUsername?.replace(/^@/, '');
+  const command = bot
+    ? new RegExp(`^/pair(?:@${escapeRegExp(bot)})?\\s+(\\S+)`, 'i')
     : /^\/pair(?:@\w+)?\s+(\S+)/i;
   return text.match(command)?.[1];
 }

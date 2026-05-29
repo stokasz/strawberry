@@ -54,6 +54,7 @@ const TELEGRAM_POLL_WARNING_THROTTLE_MS = 60_000;
 const TELEGRAM_POLL_TIMEOUT_WARNING_THRESHOLD = 3;
 const BOT_MEMBER_STATUSES = new Set(['member', 'administrator', 'creator']);
 const BOT_LEFT_STATUSES = new Set(['left', 'kicked']);
+const TELEGRAM_GROUP_PRIVACY_WARNING = '[telegram] bot Group Privacy is enabled; group chat will only receive limited updates unless the bot is a group admin. Disable Group Privacy with @BotFather or make the bot admin, then remove and re-add the bot if needed.';
 
 export type GatewayDependencies = {
   telegram: TelegramClient;
@@ -98,6 +99,51 @@ function formatAgentProgressStatus(event: AgentProgressEvent): string {
   const mood: ProgressMood = event.status === 'failed' ? 'error' : 'working';
   const suffix = event.status === 'completed' ? ' done' : event.status === 'failed' ? ' failed' : '';
   return formatProgressStatus(`${progressLabel(event.label)}${suffix}`, mood);
+}
+
+function botMention(botUsername?: string): string {
+  return botUsername ? `@${botUsername.replace(/^@/, '')}` : 'me';
+}
+
+function connectedMessage(botUsername?: string): string {
+  const mention = botMention(botUsername);
+  return [
+    '🍓 StrawberryAI connected successfully.',
+    '',
+    `Hi! I am Strawberry. Tag me as ${mention}, reply to my message, or @mention me. Let's have fun with crypto!`
+  ].join('\n');
+}
+
+function almostConnectedMessage(): string {
+  return [
+    '🍓 StrawberryAI is almost connected.',
+    '',
+    'Send /pair <code> from the Strawberry host to connect this group.'
+  ].join('\n');
+}
+
+function unpairedMessage(): string {
+  return [
+    '🍓 StrawberryAI is not connected here yet.',
+    '',
+    'Send /pair <code> using the local code from config/telegram.env, then tag me again.'
+  ].join('\n');
+}
+
+function missingPairingCodeMessage(): string {
+  return [
+    '🍓 StrawberryAI cannot pair yet.',
+    '',
+    'This host has no local Telegram pairing code configured. Run `strawberry` to regenerate config or set STRAWBERRY_TELEGRAM_PAIRING_CODE in config/telegram.env, then restart the gateway.'
+  ].join('\n');
+}
+
+function wrongPairingCodeMessage(): string {
+  return [
+    '🍓 StrawberryAI pairing code did not match.',
+    '',
+    'Use the local code from config/telegram.env on the Strawberry host.'
+  ].join('\n');
 }
 
 export function splitTelegramMessage(text: string, limit = TELEGRAM_MESSAGE_LIMIT): string[] {
@@ -165,9 +211,12 @@ export class StrawberryTelegramGateway {
       const profile = await this.deps.telegram.getMe();
       this.routingConfig = {
         ...this.routingConfig,
-        botUsername: this.routingConfig.botUsername ?? profile.username,
+        botUsername: profile.username ?? this.routingConfig.botUsername,
         botId: profile.id
       };
+      if (this.routingConfig.groupChatId !== undefined && profile.canReadAllGroupMessages === false) {
+        this.deps.logger.warn(TELEGRAM_GROUP_PRIVACY_WARNING);
+      }
     }
 
     if (this.routingConfig.groupChatId !== undefined) {
@@ -219,26 +268,38 @@ export class StrawberryTelegramGateway {
 
     await this.deps.telegram.sendMessage({
       chatId: chat.id,
-      text: 'Almost connected. Ask the Strawberry host to pair this group with /pair and the local pairing code.'
+      text: almostConnectedMessage()
     });
   }
 
   async handleMessage(message: TelegramMessage): Promise<void> {
+    if (await this.handleGroupMigration(message)) return;
+
+    const pairCode = isGroupMessage(message)
+      ? pairCommandCode(message, this.routingConfig.botUsername)
+      : undefined;
+    if (pairCode !== undefined) {
+      await this.handlePairCommand(message, pairCode);
+      return;
+    }
+
     await this.recordGroupMessage(message);
 
     let decision = routeIncomingMessageDecision(message, this.routingConfig);
-    if (!decision.route && decision.dropReason === 'group_disabled' && isGroupMessage(message)) {
-      if (this.isValidPairCommand(message)) {
-        await this.pairGroup(message.chat);
-        return;
-      }
-    }
     if (!decision.route) {
       if (decision.dropReason === 'group_disabled' && isGroupMessage(message)) {
         await this.replyToChat(
           message.chat.id,
-          'I am not paired with this group yet. Add me to the group and wait for the Connected message, then @mention me again.',
+          unpairedMessage(),
           message.message_id
+        );
+      } else if (
+        decision.dropReason === 'unrelated_group'
+        && isGroupMessage(message)
+        && this.routingConfig.groupChatId !== undefined
+      ) {
+        this.deps.logger.warn(
+          `[telegram] ignoring addressed message from group ${message.chat.id}; paired with ${this.routingConfig.groupChatId}`
         );
       }
       return;
@@ -252,7 +313,7 @@ export class StrawberryTelegramGateway {
         chatId: route.chatId,
         telegramUserId: route.sender.id
       });
-      await this.reply(route, 'Fresh session started.');
+      await this.reply(route, '🍓 Fresh Strawberry session started.');
       return;
     }
 
@@ -299,11 +360,83 @@ export class StrawberryTelegramGateway {
     } catch (error) {
       this.deps.logger.error(`[telegram] prompt failed: ${redactSensitiveText(error instanceof Error ? error.message : String(error))}`);
       await this.updateProgressStatus(progress, route, formatProgressStatus('agent request failed', 'error'));
-      await this.reply(route, 'Agent request failed.');
+      await this.reply(route, '🍓 StrawberryAI hit an agent error. Try again in a moment.');
     } finally {
       typing = false;
       await typingLoop;
     }
+  }
+
+  private async handleGroupMigration(message: TelegramMessage): Promise<boolean> {
+    const pairedId = this.routingConfig.groupChatId;
+    if (pairedId === undefined) return false;
+
+    if (message.migrate_to_chat_id !== undefined && message.chat.id === pairedId) {
+      await this.migratePairedGroup(message.migrate_to_chat_id, message.chat.title);
+      return true;
+    }
+
+    if (
+      message.migrate_from_chat_id !== undefined
+      && message.migrate_from_chat_id === pairedId
+      && message.chat.id !== pairedId
+    ) {
+      await this.migratePairedGroup(message.chat.id, message.chat.title);
+      return true;
+    }
+
+    return false;
+  }
+
+  private async migratePairedGroup(newChatId: number, title?: string): Promise<void> {
+    const oldId = this.routingConfig.groupChatId;
+    await writeRegisteredGroup(this.config.stateRoot, {
+      chatId: newChatId,
+      title,
+      registeredAt: new Date().toISOString()
+    });
+    this.routingConfig = { ...this.routingConfig, groupChatId: newChatId };
+    this.deps.logger.info(`[telegram] migrated paired group ${oldId} -> ${newChatId}`);
+  }
+
+  private async handlePairCommand(message: TelegramMessage, code: string): Promise<void> {
+    if (!this.routingConfig.pairingCode) {
+      this.deps.logger.warn('[telegram] pair command received but STRAWBERRY_TELEGRAM_PAIRING_CODE is not configured');
+      await this.replyToChat(
+        message.chat.id,
+        missingPairingCodeMessage(),
+        message.message_id
+      );
+      return;
+    }
+
+    if (code !== this.routingConfig.pairingCode) {
+      await this.replyToChat(
+        message.chat.id,
+        wrongPairingCodeMessage(),
+        message.message_id
+      );
+      return;
+    }
+
+    if (this.routingConfig.groupChatId === undefined) {
+      await this.pairGroup(message.chat);
+      return;
+    }
+
+    if (this.routingConfig.groupChatId === message.chat.id) {
+      await this.replyToChat(message.chat.id, '🍓 StrawberryAI is already connected to this group.', message.message_id);
+      return;
+    }
+
+    this.deps.logger.warn(
+      `[telegram] ignoring pair command from group ${message.chat.id}; already paired with ${this.routingConfig.groupChatId}`
+    );
+    await this.replyToChat(
+      message.chat.id,
+      '🍓 StrawberryAI is already connected to another Telegram group.',
+      message.message_id
+    );
   }
 
   private async pairGroup(chat: TelegramChat): Promise<void> {
@@ -314,19 +447,11 @@ export class StrawberryTelegramGateway {
     });
     this.routingConfig = { ...this.routingConfig, groupChatId: chat.id };
 
-    const mention = this.routingConfig.botUsername
-      ? `@${this.routingConfig.botUsername.replace(/^@/, '')}`
-      : 'me';
     await this.deps.telegram.sendMessage({
       chatId: chat.id,
-      text: `Connected. @mention ${mention} or reply to my messages to talk. Send /new to reset the session.`
+      text: connectedMessage(this.routingConfig.botUsername)
     });
     this.deps.logger.info(`[telegram] paired group ${chat.id}${chat.title ? ` (${chat.title})` : ''}`);
-  }
-
-  private isValidPairCommand(message: TelegramMessage): boolean {
-    const code = pairCommandCode(message, this.routingConfig.botUsername);
-    return Boolean(code && this.routingConfig.pairingCode && code === this.routingConfig.pairingCode);
   }
 
   private async pollOnce(): Promise<void> {
